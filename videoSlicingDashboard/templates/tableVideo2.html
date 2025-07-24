@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <title>Flussi per Switch</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 40px;
+      background: linear-gradient(to right, #e8f4fd, #ffffff);
+      color: #333;
+    }
+
+    h2 {
+      color: #2c3e50;
+      margin-bottom: 10px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .description {
+      font-size: 0.9em;
+      color: #555;
+      margin-bottom: 20px;
+    }
+
+    .filter-container {
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      flex-wrap: wrap;
+    }
+
+    .filter-container label {
+      font-weight: 500;
+      color: #333;
+    }
+
+    .filter-select {
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      background-color: #f4faff;
+      font-size: 0.95em;
+      transition: 0.3s;
+    }
+
+    .filter-select:hover {
+      border-color: #2980b9;
+      background-color: #eef7ff;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      background-color: white;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      font-size: 0.95em;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 12px;
+      text-align: center;
+    }
+
+    th {
+      background-color: #2980b9;
+      color: white;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+    }
+
+    tr:nth-child(even) {
+      background-color: #f4faff;
+    }
+
+    tr:hover {
+      background-color: #ecf6ff;
+      transition: 0.3s;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 30px;
+      margin-top: 50px;
+    }
+
+    .chart-card {
+      background-color: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: 0.3s;
+    }
+
+    .chart-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    }
+
+    canvas {
+      width: 250px !important;
+      height: 250px !important;
+    }
+
+    .icon {
+      color: #2980b9;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <h2><i class="fas fa-network-wired icon"></i>Banda attuale per ogni flusso (UDP e ICMP)</h2>
+  <div class="description">
+    Visualizzazione dei flussi in tempo reale con banda attuale tra switch. Puoi filtrare per switch e per tipo di traffico.
+  </div>
+
+  <div class="filter-container">
+    <label for="switchFilter"><i class="fas fa-filter icon"></i>Switch:</label>
+    <select id="switchFilter" class="filter-select">
+      <option value="all">Tutti</option>
+      <option value="1">Switch 1</option>
+      <option value="2">Switch 2</option>
+      <option value="3">Switch 3</option>
+      <option value="4">Switch 4</option>
+    </select>
+
+    <label for="trafficFilter"><i class="fas fa-traffic-light icon"></i>Tipo traffico:</label>
+    <select id="trafficFilter" class="filter-select">
+      <option value="all">Tutti</option>
+      <option value="udp9999">UDP porta 9999</option>
+      <option value="icmp">ICMP</option>
+      <option value="udpOther">UDP (≠9999)</option>
+    </select>
+  </div>
+
+  <table id="flowTable">
+    <thead>
+      <tr>
+        <th>Switch</th>
+        <th>Flusso</th>
+        <th>Banda (kbps)</th>
+        <th>Tipo</th>
+        <th>Protocollo IP</th>
+        <th>Porta UDP</th>
+        <th>Ultimo aggiornamento</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="chart-grid" id="charts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const chartInstances = {};
+    const chartCards = {};
+    const maxDataPoints = 20;
+
+    function createGradient(ctx) {
+      const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+      gradient.addColorStop(0, 'rgba(52, 152, 219, 0.6)');
+      gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      return gradient;
+    }
+
+    function createChart(chartId, title) {
+      const ctx = document.getElementById(chartId).getContext('2d');
+      const gradient = createGradient(ctx);
+      return new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: title,
+            data: [],
+            fill: true,
+            backgroundColor: gradient,
+            borderColor: '#3498db',
+            tension: 0.3,
+            pointRadius: 3,
+            pointBackgroundColor: '#3498db',
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          animation: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { mode: 'index', intersect: false }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { stepSize: 10 }
+            },
+            x: { display: false }
+          }
+        }
+      });
+    }
+
+    function updateTable() {
+      fetch('/flow_data')
+        .then(response => response.json())
+        .then(data => {
+          const tableBody = document.getElementById('flowTable').querySelector('tbody');
+          const chartsDiv = document.getElementById('charts');
+          const selectedSwitch = document.getElementById('switchFilter').value;
+          const selectedTraffic = document.getElementById('trafficFilter').value;
+
+          tableBody.innerHTML = '';
+          const chartsToShow = new Set();
+
+          data.forEach(flow => {
+            const normalizedSwitch = String(flow.switch).replace(/^.*?(\d+)$/, '$1');
+            if (selectedSwitch !== 'all' && selectedSwitch !== normalizedSwitch) return;
+
+            const isUdp = flow.ip_proto == 17;
+            const isIcmp = flow.ip_proto == 1;
+            const isUdpVideo = isUdp && flow.udp_dst == 9999;
+            const isUdpOther = isUdp && flow.udp_dst != 9999;
+
+            let matchesTraffic = false;
+            if (selectedTraffic === 'all') matchesTraffic = isUdpVideo || isUdpOther || isIcmp;
+            else if (selectedTraffic === 'udp9999') matchesTraffic = isUdpVideo;
+            else if (selectedTraffic === 'icmp') matchesTraffic = isIcmp;
+            else if (selectedTraffic === 'udpOther') matchesTraffic = isUdpOther;
+
+            if (!matchesTraffic) return;
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+              <td>${flow.switch}</td>
+              <td>${flow.src} → ${flow.dst}</td>
+              <td>${flow.bandwidth_kbps}</td>
+              <td>${flow.eth_type ?? '-'}</td>
+              <td>${flow.ip_proto ?? '-'}</td>
+              <td>${flow.udp_dst ?? '-'}</td>
+              <td>${flow.last_updated}</td>
+            `;
+            tableBody.appendChild(row);
+
+            const chartId = `chart-${flow.switch}-${flow.src}-${flow.dst}`.replace(/[:.]/g, '');
+            const chartKey = `${flow.switch}-${flow.src}-${flow.dst}`;
+            chartsToShow.add(chartKey);
+
+            if (!chartInstances[chartKey]) {
+              const chartCard = document.createElement('div');
+              chartCard.className = 'chart-card';
+              chartCard.id = `card-${chartKey}`;
+
+              const chartTitle = document.createElement('div');
+              chartTitle.style.marginBottom = '10px';
+              chartTitle.style.fontWeight = 'bold';
+              chartTitle.textContent = `Switch ${flow.switch} | ${flow.src} → ${flow.dst}`;
+
+              const chartCanvas = document.createElement('canvas');
+              chartCanvas.id = chartId;
+
+              chartCard.appendChild(chartTitle);
+              chartCard.appendChild(chartCanvas);
+              chartsDiv.appendChild(chartCard);
+
+              chartInstances[chartKey] = createChart(chartId, `${flow.src} → ${flow.dst}`);
+              chartCards[chartKey] = chartCard;
+            }
+
+            const now = new Date().toLocaleTimeString();
+            const chart = chartInstances[chartKey];
+            const dataset = chart.data.datasets[0];
+            const labels = chart.data.labels;
+
+            labels.push(now);
+            dataset.data.push(flow.bandwidth_kbps);
+
+            if (labels.length > maxDataPoints) {
+              labels.shift();
+              dataset.data.shift();
+            }
+
+            chart.update();
+          });
+
+          for (const key in chartInstances) {
+            if (chartsToShow.has(key)) {
+              chartCards[key].style.display = 'flex';
+            } else {
+              chartCards[key].style.display = 'none';
+            }
+          }
+        });
+    }
+
+    document.getElementById('switchFilter').addEventListener('change', updateTable);
+    document.getElementById('trafficFilter').addEventListener('change', updateTable);
+    setInterval(updateTable, 1000);
+    updateTable();
+  </script>
+</body>
+</html>

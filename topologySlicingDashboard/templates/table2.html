@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Flussi per Switch</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 40px;
+      background: linear-gradient(to right, #e6f2ff, #ffffff);
+      color: #333;
+    }
+
+    h2 {
+      color: #2c3e50;
+      margin-bottom: 10px;
+    }
+
+    .description {
+      font-size: 0.9em;
+      color: #555;
+      margin-bottom: 20px;
+    }
+
+    .filter-container {
+      margin-bottom: 20px;
+    }
+
+    .filter-select {
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      background-color: #ecf6ff;
+      font-size: 1em;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      background-color: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 12px;
+      text-align: center;
+    }
+
+    th {
+      background-color: #2980b9;
+      color: white;
+    }
+
+    tr:nth-child(even) {
+      background-color: #f0f8ff;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 30px;
+      margin-top: 50px;
+    }
+
+    .chart-card {
+      background-color: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    canvas {
+      width: 250px !important;
+      height: 250px !important;
+    }
+
+    .icon {
+      color: #2980b9;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <h2><i class="fas fa-network-wired icon"></i>Banda attuale per ogni flusso (per switch)</h2>
+  <div class="description">
+    In questa pagina vengono mostrati i flussi di rete attivi tra switch, con aggiornamenti in tempo reale della banda utilizzata.  
+    Puoi filtrare i flussi per switch specifico o visualizzarli tutti insieme.  
+  </div>
+
+  <div class="filter-container">
+    <label for="switchFilter"><i class="fas fa-filter icon"></i>Filtra per switch:</label>
+    <select id="switchFilter" class="filter-select">
+      <option value="all">Tutti</option>
+      <option value="1">Switch 1</option>
+      <option value="2">Switch 2</option>
+      <option value="3">Switch 3</option>
+      <option value="4">Switch 4</option>
+    </select>
+  </div>
+
+  <table id="flowTable">
+    <thead>
+      <tr>
+        <th>Switch</th>
+        <th>Flusso</th>
+        <th>Banda (kbps)</th>
+        <th>Ultimo aggiornamento</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="chart-grid" id="charts"></div>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script>
+    const allowedFlows = new Set([
+      "00:00:00:00:00:01-00:00:00:00:00:03",
+      "00:00:00:00:00:03-00:00:00:00:00:01",
+      "00:00:00:00:00:02-00:00:00:00:00:04",
+      "00:00:00:00:00:04-00:00:00:00:00:02"
+    ]);
+
+    const chartInstances = {};
+    const chartCards = {};
+    const maxDataPoints = 20;
+
+    function createChart(chartId, title, initialValue) {
+      const ctx = document.getElementById(chartId).getContext('2d');
+      const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+      gradient.addColorStop(0, 'rgba(52, 152, 219, 0.6)');
+      gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+      return new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [new Date().toLocaleTimeString()],
+          datasets: [{
+            label: title,
+            data: [initialValue],
+            fill: true,
+            backgroundColor: gradient,
+            borderColor: '#2980b9',
+            tension: 0.3,
+            pointRadius: 3,
+            pointBackgroundColor: '#2980b9',
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          animation: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { mode: 'index', intersect: false }
+          },
+          scales: {
+            y: { beginAtZero: true },
+            x: { display: false }
+          }
+        }
+      });
+    }
+
+    function updateTable() {
+      fetch('/flow_data')
+        .then(response => response.json())
+        .then(data => {
+          const tableBody = document.querySelector('#flowTable tbody');
+          const chartsDiv = document.getElementById('charts');
+          const selectedSwitch = document.getElementById('switchFilter').value;
+
+          // Puliamo solo la tabella
+          tableBody.innerHTML = '';
+
+          // Per tenere traccia quali chart mostrare
+          const chartsToShow = new Set();
+
+          data.forEach(flow => {
+            const flowKey = `${flow.src}-${flow.dst}`;
+            if (!allowedFlows.has(flowKey)) return;
+
+            const normalizedSwitch = String(flow.switch).replace(/^.*?(\d+)$/, '$1');
+            if (selectedSwitch !== 'all' && selectedSwitch !== normalizedSwitch) return;
+
+            // Aggiungi riga tabella
+            const row = document.createElement('tr');
+            row.innerHTML = `
+              <td>${flow.switch}</td>
+              <td>${flow.src} → ${flow.dst}</td>
+              <td>${flow.bandwidth_kbps}</td>
+              <td>${flow.last_updated}</td>
+            `;
+            tableBody.appendChild(row);
+
+            const chartKey = `${flow.switch}-${flow.src}-${flow.dst}`;
+            chartsToShow.add(chartKey);
+
+            if (!chartInstances[chartKey]) {
+              // Crea div carta + canvas
+              const chartCard = document.createElement('div');
+              chartCard.className = 'chart-card';
+              chartCard.id = `card-${chartKey}`;
+
+              const chartTitle = document.createElement('div');
+              chartTitle.style.marginBottom = '10px';
+              chartTitle.style.fontWeight = 'bold';
+              chartTitle.textContent = `Switch ${flow.switch} | ${flow.src} → ${flow.dst}`;
+
+              const chartCanvas = document.createElement('canvas');
+              const chartId = `chart-${chartKey}`.replace(/[:.]/g, '');
+              chartCanvas.id = chartId;
+
+              chartCard.appendChild(chartTitle);
+              chartCard.appendChild(chartCanvas);
+              chartsDiv.appendChild(chartCard);
+
+              chartInstances[chartKey] = createChart(chartId, `${flow.src} → ${flow.dst}`, flow.bandwidth_kbps);
+              chartCards[chartKey] = chartCard;
+            } else {
+              // Aggiorna grafico esistente
+              const chart = chartInstances[chartKey];
+              const now = new Date().toLocaleTimeString();
+              chart.data.labels.push(now);
+              chart.data.datasets[0].data.push(flow.bandwidth_kbps);
+
+              if (chart.data.labels.length > maxDataPoints) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+              }
+
+              chart.update();
+            }
+          });
+
+          // Mostra solo i grafici attivi, nascondi gli altri
+          for (const key in chartInstances) {
+            if (chartsToShow.has(key)) {
+              chartCards[key].style.display = 'flex';
+            } else {
+              chartCards[key].style.display = 'none';
+            }
+          }
+        });
+    }
+
+    document.getElementById('switchFilter').addEventListener('change', updateTable);
+    setInterval(updateTable, 1000);
+    updateTable();
+  </script>
+</body>
+</html>
